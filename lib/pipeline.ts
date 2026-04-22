@@ -18,9 +18,31 @@ function isPpt(file: File): boolean {
   );
 }
 
+function isLikelyPdf(bytes: Uint8Array): boolean {
+  const probeLen = Math.min(bytes.length, 1024);
+  const probe = new TextDecoder("ascii", { fatal: false }).decode(bytes.slice(0, probeLen));
+  return probe.includes("%PDF-");
+}
+
+function explainNonPdf(bytes: Uint8Array): string {
+  const probeLen = Math.min(bytes.length, 300);
+  const preview = new TextDecoder("utf-8", { fatal: false }).decode(bytes.slice(0, probeLen)).trim();
+  if (!preview) return "返回内容为空";
+  if (preview.startsWith("<") || preview.toLowerCase().includes("html")) {
+    return "返回内容像 HTML 错误页";
+  }
+  return `返回内容前缀：${preview.slice(0, 120)}`;
+}
+
+function ensurePdf(bytes: Uint8Array, scene: string): Uint8Array {
+  if (isLikelyPdf(bytes)) return bytes;
+  throw new Error(`${scene} 不是有效 PDF（No PDF header found）。${explainNonPdf(bytes)}`);
+}
+
 async function convertInputToPdf(file: File): Promise<Uint8Array> {
   if (isPdf(file)) {
-    return new Uint8Array(await file.arrayBuffer());
+    const raw = new Uint8Array(await file.arrayBuffer());
+    return ensurePdf(raw, "上传文件");
   }
 
   if (!isPpt(file)) {
@@ -34,13 +56,20 @@ async function convertInputToPdf(file: File): Promise<Uint8Array> {
     const msg = await response.text();
     throw new Error(msg || "PPT/PPTX 转换失败");
   }
-  return new Uint8Array(await response.arrayBuffer());
+  const converted = new Uint8Array(await response.arrayBuffer());
+  return ensurePdf(converted, "转换结果");
 }
 
 export async function buildPagePipeline(file: File): Promise<PagePipelineResult> {
   const sourcePdfBytes = await convertInputToPdf(file);
-  const loadingTask = getDocument({ data: sourcePdfBytes });
-  const pdf = await loadingTask.promise;
+  let pdf;
+  try {
+    const loadingTask = getDocument({ data: sourcePdfBytes });
+    pdf = await loadingTask.promise;
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : "PDF 解析失败";
+    throw new Error(`PDF 解析失败：${msg}`);
+  }
 
   const pages = await Promise.all(
     Array.from({ length: pdf.numPages }, async (_, i) => {
