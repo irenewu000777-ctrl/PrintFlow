@@ -10,6 +10,8 @@ export const PAPER_SIZE_MM: Record<PaperSizeKey, { width: number; height: number
 };
 
 export const PAPER_SIZE_OPTIONS: PaperSizeKey[] = ["A4", "A5", "Letter", "B5"];
+export const MAX_PDF_FILE_SIZE_MB = 40;
+export const MAX_PDF_FILE_SIZE_BYTES = MAX_PDF_FILE_SIZE_MB * 1024 * 1024;
 
 export const ENCOURAGEMENTS = [
   "你已经完成最重要的一步",

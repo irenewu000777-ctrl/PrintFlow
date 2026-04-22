@@ -1,7 +1,7 @@
 "use client";
 
 import type { ChangeEvent } from "react";
-import { PAPER_SIZE_OPTIONS } from "@/lib/constants";
+import { MAX_PDF_FILE_SIZE_MB, PAPER_SIZE_OPTIONS } from "@/lib/constants";
 import type { LayoutSettings } from "@/lib/types";
 
 interface ControlPanelProps {
@@ -31,13 +31,14 @@ export function ControlPanel({
       <h2 className="mb-4 text-lg font-semibold">排版控制台</h2>
       <div className="space-y-4 text-sm">
         <label className="block">
-          <span className="mb-1 block font-medium">上传文件（PDF / PPT / PPTX）</span>
+          <span className="mb-1 block font-medium">上传文件（仅 PDF）</span>
           <input
             type="file"
-            accept=".pdf,.ppt,.pptx,application/pdf"
+            accept=".pdf,application/pdf"
             onChange={handleUpload}
             className="block w-full rounded border border-slate-300 px-2 py-2"
           />
+          <p className="mt-1 text-slate-500">最大文件限额：{MAX_PDF_FILE_SIZE_MB}MB</p>
           {sourceName ? <p className="mt-1 text-slate-500">当前文件：{sourceName}</p> : null}
         </label>
 

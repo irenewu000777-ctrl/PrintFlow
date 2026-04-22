@@ -80,7 +80,7 @@ export default function HomePage() {
     <main className="min-h-screen p-4 md:p-6">
       <header className="mb-4">
         <h1 className="text-2xl font-bold text-slate-900">Study Imposition Engine</h1>
-        <p className="text-sm text-slate-600">仅做页面拼版，不修改单页内容。</p>
+        <p className="text-sm text-slate-600">仅做页面拼版，不修改单页内容。当前版本仅支持 PDF 上传。</p>
       </header>
 
       <div className="flex flex-col gap-4 lg:flex-row">

@@ -2,20 +2,13 @@
 
 import { GlobalWorkerOptions, getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import pdfjsPkg from "pdfjs-dist/package.json";
+import { MAX_PDF_FILE_SIZE_BYTES, MAX_PDF_FILE_SIZE_MB } from "./constants";
 import type { PagePipelineResult } from "./types";
 
 GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsPkg.version}/build/pdf.worker.min.mjs`;
 
 function isPdf(file: File): boolean {
   return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
-}
-
-function isPpt(file: File): boolean {
-  return (
-    file.name.toLowerCase().endsWith(".ppt") ||
-    file.name.toLowerCase().endsWith(".pptx") ||
-    file.type.includes("presentation")
-  );
 }
 
 function isLikelyPdf(bytes: Uint8Array): boolean {
@@ -39,44 +32,20 @@ function ensurePdf(bytes: Uint8Array, scene: string): Uint8Array {
   throw new Error(`${scene} 不是有效 PDF（No PDF header found）。${explainNonPdf(bytes)}`);
 }
 
-function getConvertEndpoint(): string {
-  const direct = process.env.NEXT_PUBLIC_CONVERT_API_URL?.trim();
-  if (direct) return direct;
-  return "/api/convert";
-}
-
 async function convertInputToPdf(file: File): Promise<Uint8Array> {
+  if (!isPdf(file)) {
+    throw new Error("当前仅支持 PDF 文件上传。");
+  }
+
+  if (file.size > MAX_PDF_FILE_SIZE_BYTES) {
+    throw new Error(`文件超出限制：最大支持 ${MAX_PDF_FILE_SIZE_MB}MB PDF。`);
+  }
+
   if (isPdf(file)) {
     const raw = new Uint8Array(await file.arrayBuffer());
     return ensurePdf(raw, "上传文件");
   }
-
-  if (!isPpt(file)) {
-    throw new Error("仅支持 PDF / PPT / PPTX 文件");
-  }
-
-  const formData = new FormData();
-  formData.append("file", file);
-  const headers: HeadersInit = {};
-  const directKey = process.env.NEXT_PUBLIC_CONVERT_API_KEY?.trim();
-  if (directKey) {
-    headers.Authorization = `Bearer ${directKey}`;
-  }
-
-  const response = await fetch(getConvertEndpoint(), {
-    method: "POST",
-    body: formData,
-    headers
-  });
-  if (!response.ok) {
-    const msg = await response.text();
-    if (response.status === 413) {
-      throw new Error("上传文件过大：当前上传通道达到限制。请配置 NEXT_PUBLIC_CONVERT_API_URL 直连转换服务。");
-    }
-    throw new Error(msg || "PPT/PPTX 转换失败");
-  }
-  const converted = new Uint8Array(await response.arrayBuffer());
-  return ensurePdf(converted, "转换结果");
+  throw new Error("当前仅支持 PDF 文件上传。");
 }
 
 export async function buildPagePipeline(file: File): Promise<PagePipelineResult> {
