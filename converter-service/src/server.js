@@ -14,6 +14,18 @@ const upload = multer({
 
 const PORT = process.env.PORT || 8080;
 const API_KEY = process.env.CONVERTER_API_KEY || "";
+const CORS_ORIGIN = process.env.CORS_ORIGIN || "*";
+
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", CORS_ORIGIN);
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization");
+  if (req.method === "OPTIONS") {
+    res.status(204).end();
+    return;
+  }
+  next();
+});
 
 function requireAuth(req, res, next) {
   if (!API_KEY) return next();

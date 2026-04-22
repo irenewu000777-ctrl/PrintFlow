@@ -148,6 +148,16 @@ CONVERT_API_KEY=your-secret-key
 
 配置后重新部署即可完成端到端 PPT/PPTX 自动转换。
 
+如果你在 Vercel 遇到 `FUNCTION_PAYLOAD_TOO_LARGE`（大文件上传超限），请改为前端直连转换服务：
+
+```bash
+NEXT_PUBLIC_CONVERT_API_URL=https://your-converter-domain/convert
+NEXT_PUBLIC_CONVERT_API_KEY=your-secret-key
+```
+
+这样上传将绕过 Vercel `/api/convert`，直接发送到转换服务。
+对应地，请在 `converter-service` 配置 `CORS_ORIGIN`（如你的 Vercel 域名）。
+
 ### 生产建议
 
 - Vercel Serverless 通常不适合直接运行 LibreOffice，推荐使用外部转换服务并配置 `CONVERT_API_URL`

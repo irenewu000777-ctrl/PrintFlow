@@ -39,6 +39,12 @@ function ensurePdf(bytes: Uint8Array, scene: string): Uint8Array {
   throw new Error(`${scene} 不是有效 PDF（No PDF header found）。${explainNonPdf(bytes)}`);
 }
 
+function getConvertEndpoint(): string {
+  const direct = process.env.NEXT_PUBLIC_CONVERT_API_URL?.trim();
+  if (direct) return direct;
+  return "/api/convert";
+}
+
 async function convertInputToPdf(file: File): Promise<Uint8Array> {
   if (isPdf(file)) {
     const raw = new Uint8Array(await file.arrayBuffer());
@@ -51,9 +57,22 @@ async function convertInputToPdf(file: File): Promise<Uint8Array> {
 
   const formData = new FormData();
   formData.append("file", file);
-  const response = await fetch("/api/convert", { method: "POST", body: formData });
+  const headers: HeadersInit = {};
+  const directKey = process.env.NEXT_PUBLIC_CONVERT_API_KEY?.trim();
+  if (directKey) {
+    headers.Authorization = `Bearer ${directKey}`;
+  }
+
+  const response = await fetch(getConvertEndpoint(), {
+    method: "POST",
+    body: formData,
+    headers
+  });
   if (!response.ok) {
     const msg = await response.text();
+    if (response.status === 413) {
+      throw new Error("上传文件过大：当前上传通道达到限制。请配置 NEXT_PUBLIC_CONVERT_API_URL 直连转换服务。");
+    }
     throw new Error(msg || "PPT/PPTX 转换失败");
   }
   const converted = new Uint8Array(await response.arrayBuffer());
