@@ -333,6 +333,79 @@ function forceLayoutCalculation(slideElement: HTMLElement): void {
   });
 }
 
+async function nextFrame(): Promise<void> {
+  await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+}
+
+async function waitForImagesDecoded(slideElement: HTMLElement): Promise<void> {
+  const images = Array.from(slideElement.querySelectorAll("img"));
+  await Promise.all(
+    images.map(async (img) => {
+      try {
+        if ("decode" in img && typeof img.decode === "function") {
+          await img.decode();
+          return;
+        }
+      } catch {
+        // fallback to load state check
+      }
+      if (img.complete) return;
+      await new Promise<void>((resolve) => {
+        const done = () => {
+          img.removeEventListener("load", done);
+          img.removeEventListener("error", done);
+          resolve();
+        };
+        img.addEventListener("load", done);
+        img.addEventListener("error", done);
+      });
+    })
+  );
+}
+
+function collectVisibleNodeStats(slideElement: HTMLElement): { visibleNodes: number; paintedNodes: number; key: string } {
+  const nodes = [slideElement, ...Array.from(slideElement.querySelectorAll("*"))].filter(
+    (el): el is HTMLElement => el instanceof HTMLElement
+  );
+  let visibleNodes = 0;
+  let paintedNodes = 0;
+  for (const node of nodes) {
+    const style = window.getComputedStyle(node);
+    if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity || "1") === 0) continue;
+    visibleNodes += 1;
+    const rect = node.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) paintedNodes += 1;
+  }
+  const key = `${visibleNodes}:${paintedNodes}:${slideElement.scrollWidth}:${slideElement.scrollHeight}`;
+  return { visibleNodes, paintedNodes, key };
+}
+
+async function waitForVisualStability(slideElement: HTMLElement): Promise<{ ms: number; stable: boolean; missingNodes: boolean }> {
+  const start = performance.now();
+  const fonts = (document as Document & { fonts?: { ready?: Promise<unknown> } }).fonts;
+  if (fonts?.ready) {
+    try {
+      await fonts.ready;
+    } catch {
+      // continue
+    }
+  }
+  await waitForImagesDecoded(slideElement);
+  await nextFrame();
+  await nextFrame();
+  forceLayoutCalculation(slideElement);
+
+  const s1 = collectVisibleNodeStats(slideElement);
+  await nextFrame();
+  const s2 = collectVisibleNodeStats(slideElement);
+  await nextFrame();
+  const s3 = collectVisibleNodeStats(slideElement);
+  const stable = s1.key === s2.key && s2.key === s3.key;
+  const missingNodes = s3.visibleNodes > 0 && s3.paintedNodes < Math.max(1, Math.floor(s3.visibleNodes * 0.75));
+  const ms = Math.round(performance.now() - start);
+  return { ms, stable, missingNodes };
+}
+
 function detectZeroClientHeightText(slideElement: HTMLElement): boolean {
   const nodes = [slideElement, ...Array.from(slideElement.querySelectorAll("*"))].filter(
     (el): el is HTMLElement => el instanceof HTMLElement
@@ -543,6 +616,10 @@ async function buildPptSnapshotPages(
       }
       await waitForTextLayoutReady(slideNode);
       forceLayoutCalculation(slideNode);
+      const visualState = await waitForVisualStability(slideNode);
+      diagnostics && (diagnostics.renderReadyTimeMs = Math.max(diagnostics.renderReadyTimeMs ?? 0, visualState.ms));
+      diagnostics && (diagnostics.paintStableConfirmed = (diagnostics.paintStableConfirmed ?? true) && visualState.stable);
+      diagnostics && (diagnostics.missingNodeDetection = Boolean(diagnostics.missingNodeDetection || visualState.missingNodes));
       const zeroClientHeightDetected = detectZeroClientHeightText(slideNode);
       if (zeroClientHeightDetected) {
         diagnostics && (diagnostics.zeroClientHeightDetected = true);
@@ -593,12 +670,25 @@ async function buildPptSnapshotPages(
       slideNode.style.paddingBottom = "0";
       slideNode.style.boxSizing = "border-box";
       slideNode.style.overflow = "hidden";
-      const { canvas: rawCanvas, renderer } = await renderSlideToCanonicalCanvas(
+      let { canvas: rawCanvas, renderer } = await renderSlideToCanonicalCanvas(
         toCanvas,
         slideNode,
         slideSize,
         renderScale
       );
+      if (visualState.missingNodes || !visualState.stable) {
+        diagnostics?.failureReasons.push(`第 ${i + 1} 页检测到 paint 未稳定，执行重渲染重试`);
+        previewer.renderSingleSlide(i);
+        const retryNode = resolveSlideRoot(previewer as { wrapper?: HTMLElement }, host);
+        if (retryNode) {
+          await waitForStableSlide(retryNode);
+          await waitForTextLayoutReady(retryNode);
+          await waitForVisualStability(retryNode);
+          const retryResult = await renderSlideToCanonicalCanvas(toCanvas, retryNode, slideSize, renderScale);
+          rawCanvas = retryResult.canvas;
+          renderer = retryResult.renderer;
+        }
+      }
       if (renderer === "fallback") {
         fallbackUsed = true;
         debugLog(debugMode, `fallback renderer used on slide ${i + 1}`);

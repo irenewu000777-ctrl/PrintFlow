@@ -157,6 +157,9 @@ export default function HomePage() {
             <div>Zero Client Height Detected: {pipeline.diagnostics.zeroClientHeightDetected ? "Yes" : "No"}</div>
             <div>Layout Recovered: {pipeline.diagnostics.layoutRecovered ? "Yes" : "No"}</div>
             <div>Capture Mode: {pipeline.diagnostics.captureMode ?? "-"}</div>
+            <div>Render Ready Time(ms): {pipeline.diagnostics.renderReadyTimeMs ?? 0}</div>
+            <div>Paint Stable Confirmed: {pipeline.diagnostics.paintStableConfirmed ? "Yes" : "No"}</div>
+            <div>Missing Node Detection: {pipeline.diagnostics.missingNodeDetection ? "Yes" : "No"}</div>
             <div>
               Text Box Metrics:{" "}
               {(pipeline.diagnostics.textBoxDiagnostics ?? [])
