@@ -85,34 +85,96 @@ async function waitForStableSlide(slideNode: Element): Promise<void> {
   });
 }
 
+function toPositiveNumber(value: unknown): number | null {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n;
+}
+
+function resolveSlideSize(deck: unknown): { width: number; height: number } {
+  const raw = (deck ?? {}) as { width?: unknown; height?: unknown };
+  const width = toPositiveNumber(raw.width);
+  const height = toPositiveNumber(raw.height);
+  if (width && height) return { width, height };
+  // 默认 4:3，避免尺寸未知时出现异常裁切。
+  return { width: 960, height: 720 };
+}
+
+function getCaptureBounds(slideNode: HTMLElement, expectedWidth: number, expectedHeight: number): { width: number; height: number } {
+  const rect = slideNode.getBoundingClientRect();
+  const measuredWidth = Math.max(expectedWidth, Math.ceil(rect.width), slideNode.scrollWidth, slideNode.clientWidth);
+  const measuredHeight = Math.max(expectedHeight, Math.ceil(rect.height), slideNode.scrollHeight, slideNode.clientHeight);
+  return {
+    width: Math.max(1, measuredWidth),
+    height: Math.max(1, measuredHeight)
+  };
+}
+
+function ratioDiff(a: number, b: number): number {
+  return Math.abs(a - b) / Math.max(b, Number.EPSILON);
+}
+
+async function captureSlideSnapshot(
+  html2canvas: (element: HTMLElement, options: Record<string, unknown>) => Promise<HTMLCanvasElement>,
+  slideNode: HTMLElement,
+  targetWidth: number,
+  targetHeight: number,
+  bleedPx: number,
+  renderScale: number
+): Promise<HTMLCanvasElement> {
+  return html2canvas(slideNode, {
+    backgroundColor: "#ffffff",
+    scale: renderScale,
+    useCORS: true,
+    allowTaint: true,
+    logging: false,
+    width: targetWidth,
+    height: targetHeight,
+    windowWidth: targetWidth,
+    windowHeight: targetHeight,
+    x: -bleedPx,
+    y: -bleedPx,
+    scrollX: 0,
+    scrollY: 0
+  });
+}
+
 async function buildPptSnapshotPages(
   file: File,
   onProgress?: (progress: PipelineProgress) => void,
-  snapshotScale = 2
+  snapshotScale = 3
 ): Promise<Page[]> {
   const [{ init }, html2canvasModule] = await Promise.all([import("pptx-preview"), import("html2canvas")]);
   const html2canvas = html2canvasModule.default;
   const raw = await file.arrayBuffer();
   const host = document.createElement("div");
+  const bleedPx = 8;
   host.style.position = "fixed";
-  host.style.left = "-20000px";
+  host.style.left = "-100000px";
   host.style.top = "0";
-  host.style.width = "1280px";
-  host.style.height = "720px";
+  host.style.overflow = "visible";
   host.style.opacity = "0";
   host.style.pointerEvents = "none";
   host.style.background = "#fff";
+  host.style.zIndex = "-1";
   document.body.appendChild(host);
 
   try {
-    const previewer = init(host, { width: 1280, height: 720, mode: "slide" });
+    const previewer = init(host, { mode: "slide" });
     const deck = await previewer.load(raw);
+    const slideSize = resolveSlideSize(deck);
+    host.style.width = `${slideSize.width + bleedPx * 2}px`;
+    host.style.height = `${slideSize.height + bleedPx * 2}px`;
+    host.style.padding = `${bleedPx}px`;
+    host.style.boxSizing = "content-box";
     const total = previewer.slideCount || deck?.slides?.length || 0;
     if (!total) {
       throw new Error("未解析到任何幻灯片");
     }
 
     const pages: Page[] = [];
+    const renderScale = Math.max(2, Math.min(3, Math.round(snapshotScale || 3)));
+    const expectedRatio = slideSize.width / slideSize.height;
     for (let i = 0; i < total; i += 1) {
       onProgress?.({
         message: "正在生成幻灯片预览...",
@@ -130,13 +192,30 @@ async function buildPptSnapshotPages(
       }
 
       await waitForStableSlide(slideNode);
-      const canvas = await html2canvas(slideNode as HTMLElement, {
-        backgroundColor: "#ffffff",
-        scale: Math.max(2, Math.min(3, snapshotScale)),
-        useCORS: true,
-        allowTaint: true,
-        logging: false
-      });
+      const slideElement = slideNode as HTMLElement;
+      const bounds = getCaptureBounds(slideElement, slideSize.width, slideSize.height);
+
+      let canvas = await captureSlideSnapshot(
+        html2canvas,
+        slideElement,
+        bounds.width,
+        bounds.height,
+        bleedPx,
+        renderScale
+      );
+
+      // 自动校验比例；若比例偏差过大，按原始 slide 尺寸强制重采样一次。
+      const actualRatio = canvas.width / canvas.height;
+      if (ratioDiff(actualRatio, expectedRatio) > 0.02) {
+        canvas = await captureSlideSnapshot(
+          html2canvas,
+          slideElement,
+          slideSize.width,
+          slideSize.height,
+          bleedPx,
+          renderScale
+        );
+      }
 
       pages.push({
         id: `${file.name}-${i + 1}`,
