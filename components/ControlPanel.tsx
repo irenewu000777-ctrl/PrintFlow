@@ -9,8 +9,10 @@ interface ControlPanelProps {
   loading: boolean;
   sourceName: string | null;
   statusText?: string | null;
+  debugMode?: boolean;
   onFileChange: (file: File | null) => void;
   onSettingsChange: (next: LayoutSettings) => void;
+  onDebugModeChange?: (enabled: boolean) => void;
   onGenerate: () => void;
   onRetry?: () => void;
 }
@@ -20,8 +22,10 @@ export function ControlPanel({
   loading,
   sourceName,
   statusText,
+  debugMode,
   onFileChange,
   onSettingsChange,
+  onDebugModeChange,
   onGenerate,
   onRetry
 }: ControlPanelProps) {
@@ -131,6 +135,14 @@ export function ControlPanel({
             onChange={(e) => onSettingsChange({ ...settings, gapMm: Number(e.target.value) })}
             className="w-full"
           />
+        </label>
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={Boolean(debugMode)}
+            onChange={(e) => onDebugModeChange?.(e.target.checked)}
+          />
+          <span className="text-slate-600">调试模式（输出诊断信息）</span>
         </label>
 
         <button
