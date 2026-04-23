@@ -120,6 +120,8 @@ interface VerticalCaptureBoundary {
   topBleed: number;
   bottomBleed: number;
   contentExceedsFrame: boolean;
+  extensionAmount: number;
+  overCaptureDetected: boolean;
 }
 
 function detectBlankCanvas(canvas: HTMLCanvasElement): boolean {
@@ -204,8 +206,13 @@ function computeContentBBoxBottom(slideElement: HTMLElement): number {
     (el): el is HTMLElement => el instanceof HTMLElement
   );
   for (const el of all) {
+    const style = window.getComputedStyle(el);
+    if (style.display === "none" || style.visibility === "hidden" || style.contentVisibility === "hidden") continue;
+    if (Number.parseFloat(style.opacity || "1") === 0) continue;
     const rect = el.getBoundingClientRect();
     if (rect.width <= 0 && rect.height <= 0) continue;
+    // 过滤明显离开页面框的 artifact 节点，避免 bbox 虚高。
+    if (rect.top - rootRect.top > slideElement.clientHeight * 1.5) continue;
     const relBottom = rect.bottom - rootRect.top;
     if (Number.isFinite(relBottom)) {
       maxBottom = Math.max(maxBottom, relBottom);
@@ -216,12 +223,15 @@ function computeContentBBoxBottom(slideElement: HTMLElement): number {
 
 function computeVerticalCaptureBoundary(slideElement: HTMLElement, slideHeight: number): VerticalCaptureBoundary {
   const contentBBoxBottom = computeContentBBoxBottom(slideElement);
-  const baseHeight = Math.max(slideHeight, contentBBoxBottom);
-  const topBleed = 8;
-  const nearBottomThreshold = Math.max(16, Math.ceil(slideHeight * 0.02));
+  const topBleed = 4;
+  const maxExtension = Math.max(20, Math.ceil(slideHeight * 0.03));
+  const rawExtension = Math.max(0, contentBBoxBottom - slideHeight);
+  const extensionAmount = Math.min(rawExtension, maxExtension);
+  const baseHeight = Math.ceil(slideHeight + extensionAmount);
+  const nearBottomThreshold = Math.max(14, Math.ceil(slideHeight * 0.015));
   const distToBottom = Math.max(0, slideHeight - contentBBoxBottom);
-  const extraBottomPadding = distToBottom < nearBottomThreshold ? 16 : 0;
-  const bottomBleed = Math.max(24, Math.ceil(baseHeight * 0.04)) + extraBottomPadding;
+  const extraBottomPadding = distToBottom < nearBottomThreshold ? 10 : 0;
+  const bottomBleed = 10 + extraBottomPadding;
   const finalCaptureHeight = Math.ceil(baseHeight + topBleed + bottomBleed);
   return {
     slideHeight: Math.ceil(slideHeight),
@@ -229,8 +239,40 @@ function computeVerticalCaptureBoundary(slideElement: HTMLElement, slideHeight: 
     finalCaptureHeight,
     topBleed,
     bottomBleed,
-    contentExceedsFrame: contentBBoxBottom > slideHeight
+    contentExceedsFrame: contentBBoxBottom > slideHeight,
+    extensionAmount,
+    overCaptureDetected: rawExtension > maxExtension
   };
+}
+
+function patchTextLayoutForSnapshot(slideElement: HTMLElement): boolean {
+  let overflowDetected = false;
+  const nodes = [slideElement, ...Array.from(slideElement.querySelectorAll("*"))].filter(
+    (el): el is HTMLElement => el instanceof HTMLElement
+  );
+  for (const node of nodes) {
+    if (!node.textContent?.trim()) continue;
+    const style = window.getComputedStyle(node);
+    const isTextContainer =
+      style.display.includes("block") ||
+      style.display.includes("inline-block") ||
+      style.display.includes("flex");
+    if (!isTextContainer) continue;
+    const clipped =
+      node.scrollHeight - node.clientHeight > 2 &&
+      (style.overflowY === "hidden" || style.overflowY === "clip" || style.overflow === "hidden");
+    if (!clipped) continue;
+    overflowDetected = true;
+    node.style.overflowY = "visible";
+    node.style.overflow = "visible";
+    node.style.height = "auto";
+    node.style.maxHeight = "none";
+    if (style.whiteSpace === "nowrap") {
+      node.style.whiteSpace = "normal";
+    }
+    node.style.wordBreak = "break-word";
+  }
+  return overflowDetected;
 }
 
 async function captureSlideSnapshot(
@@ -366,6 +408,7 @@ async function buildPptSnapshotPages(
       if (i === 0) firstSlideElementByRef.current = slideNode;
 
       const boundary = computeVerticalCaptureBoundary(slideNode, slideSize.height);
+      const textOverflowDetected = patchTextLayoutForSnapshot(slideNode);
       if (debugMode) {
         debugLog(debugMode, `slide ${i + 1} vertical boundary`, boundary);
       }
@@ -378,6 +421,9 @@ async function buildPptSnapshotPages(
         bleedAdded: boundary.topBleed + boundary.bottomBleed,
         contentExceedsFrame: boundary.contentExceedsFrame
       });
+      diagnostics && (diagnostics.overCaptureDetected = Boolean(diagnostics.overCaptureDetected || boundary.overCaptureDetected));
+      diagnostics && (diagnostics.bboxExtensionAmount = Math.max(diagnostics.bboxExtensionAmount ?? 0, boundary.extensionAmount));
+      diagnostics && (diagnostics.textOverflowDetected = Boolean(diagnostics.textOverflowDetected || textOverflowDetected));
 
       slideNode.style.width = `${Math.ceil(slideSize.width)}px`;
       slideNode.style.height = `${Math.ceil(boundary.finalCaptureHeight)}px`;

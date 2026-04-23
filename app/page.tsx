@@ -148,6 +148,9 @@ export default function HomePage() {
             <div>Aspect Ratios: {(pipeline.diagnostics.aspectRatios ?? []).join(", ") || "-"}</div>
             <div>Stability Runs: {pipeline.diagnostics.stabilityRuns ?? 0}</div>
             <div>Stability Mismatches: {pipeline.diagnostics.stabilityMismatches ?? 0}</div>
+            <div>Over Capture Detected: {pipeline.diagnostics.overCaptureDetected ? "Yes" : "No"}</div>
+            <div>BBox Extension: {pipeline.diagnostics.bboxExtensionAmount ?? 0}</div>
+            <div>Text Overflow Detected: {pipeline.diagnostics.textOverflowDetected ? "Yes" : "No"}</div>
             <div>
               Bottom Capture:{" "}
               {(pipeline.diagnostics.bottomClipChecks ?? [])

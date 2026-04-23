@@ -46,6 +46,9 @@ export interface PipelineDiagnostics {
     bleedAdded: number;
     contentExceedsFrame: boolean;
   }>;
+  overCaptureDetected?: boolean;
+  bboxExtensionAmount?: number;
+  textOverflowDetected?: boolean;
   exportImageCount?: number;
   rendererUsed?: "primary" | "fallback";
   failureReasons: string[];
