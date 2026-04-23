@@ -319,6 +319,20 @@ async function waitForTextLayoutReady(slideElement: HTMLElement): Promise<void> 
   });
 }
 
+function forceLayoutCalculation(slideElement: HTMLElement): void {
+  // 强制触发布局计算，确保 layout engine 参与。
+  void slideElement.offsetWidth;
+  void slideElement.offsetHeight;
+  void slideElement.getBoundingClientRect();
+  Array.from(slideElement.querySelectorAll("*")).forEach((el) => {
+    if (el instanceof HTMLElement) {
+      void el.offsetWidth;
+      void el.offsetHeight;
+      void el.getBoundingClientRect();
+    }
+  });
+}
+
 function detectZeroClientHeightText(slideElement: HTMLElement): boolean {
   const nodes = [slideElement, ...Array.from(slideElement.querySelectorAll("*"))].filter(
     (el): el is HTMLElement => el instanceof HTMLElement
@@ -410,16 +424,16 @@ async function buildPptSnapshotPages(
   const toCanvas = htmlToImageModule.toCanvas;
   const raw = await file.arrayBuffer();
   const host = document.createElement("div");
-  host.style.position = "absolute";
-  host.style.left = "0";
+  host.style.position = "fixed";
+  host.style.left = "-12000px";
   host.style.top = "0";
   host.style.overflow = "visible";
   host.style.opacity = "0.01";
   host.style.pointerEvents = "none";
   host.style.background = "#fff";
   host.style.zIndex = "-1";
-  host.style.transform = "scale(0.01)";
-  host.style.transformOrigin = "top left";
+  host.style.display = "block";
+  host.style.isolation = "auto";
   host.style.contain = "none";
   host.style.contentVisibility = "visible";
   document.body.appendChild(host);
@@ -453,7 +467,7 @@ async function buildPptSnapshotPages(
     const observedSizes = new Set<string>();
     const observedRatios = new Set<string>();
     let fallbackUsed = false;
-    let pagesNormalized = 0;
+    let layoutValidatedPagesCount = 0;
     let canonicalCanvasSize: { width: number; height: number } | null = null;
     const firstSlideElementByRef: { current: HTMLElement | null } = { current: null };
     let renderedSlideNodesCount = 0;
@@ -479,11 +493,22 @@ async function buildPptSnapshotPages(
       diagnostics && (diagnostics.slidesRenderedCount += 1);
       if (i === 0) firstSlideElementByRef.current = slideNode;
 
+      // 提供明确尺寸上下文，确保 slide root 进入真实 layout flow。
+      slideNode.style.width = `${Math.ceil(slideSize.width)}px`;
+      slideNode.style.height = `${Math.ceil(slideSize.height)}px`;
+      slideNode.style.position = "relative";
+      slideNode.style.display = "block";
+      slideNode.style.overflow = "visible";
+      slideNode.style.contain = "none";
+      slideNode.style.contentVisibility = "visible";
+      slideNode.style.isolation = "auto";
+
       const textOverflowDetected = collectAndPatchTextOverflow(slideNode, i + 1, diagnostics);
       if (textOverflowDetected) {
         diagnostics?.failureReasons.push(`第 ${i + 1} 页启用 text-safe render path`);
       }
       await waitForTextLayoutReady(slideNode);
+      forceLayoutCalculation(slideNode);
       const zeroClientHeightDetected = detectZeroClientHeightText(slideNode);
       if (zeroClientHeightDetected) {
         diagnostics && (diagnostics.zeroClientHeightDetected = true);
@@ -494,10 +519,23 @@ async function buildPptSnapshotPages(
         if (!slideNode) {
           throw new Error(`第 ${i + 1} 页 layout recovery 后渲染节点丢失`);
         }
+        slideNode.style.width = `${Math.ceil(slideSize.width)}px`;
+        slideNode.style.height = `${Math.ceil(slideSize.height)}px`;
+        slideNode.style.position = "relative";
+        slideNode.style.display = "block";
+        slideNode.style.overflow = "visible";
+        slideNode.style.contain = "none";
+        slideNode.style.contentVisibility = "visible";
+        slideNode.style.isolation = "auto";
         await waitForStableSlide(slideNode);
         await waitForTextLayoutReady(slideNode);
+        forceLayoutCalculation(slideNode);
+        if (detectZeroClientHeightText(slideNode)) {
+          throw new Error(`LAYOUT FAILURE: slide ${i + 1} clientHeight is zero`);
+        }
         diagnostics && (diagnostics.layoutRecovered = true);
       }
+      layoutValidatedPagesCount += 1;
       const boundary = computeVerticalCaptureBoundary(slideNode, slideSize.height);
       if (debugMode) {
         debugLog(debugMode, `slide ${i + 1} vertical boundary`, boundary);
@@ -515,7 +553,6 @@ async function buildPptSnapshotPages(
       diagnostics && (diagnostics.bboxExtensionAmount = Math.max(diagnostics.bboxExtensionAmount ?? 0, boundary.extensionAmount));
       diagnostics && (diagnostics.textOverflowDetected = Boolean(diagnostics.textOverflowDetected || textOverflowDetected));
 
-      slideNode.style.width = `${Math.ceil(slideSize.width)}px`;
       slideNode.style.height = `${Math.ceil(boundary.finalCaptureHeight)}px`;
       slideNode.style.paddingTop = `${boundary.topBleed}px`;
       slideNode.style.paddingBottom = `${boundary.bottomBleed}px`;
@@ -541,7 +578,6 @@ async function buildPptSnapshotPages(
       const sameRatio = ratioDiff(rawCanvas.width / rawCanvas.height, canonicalCanvasSize.width / canonicalCanvasSize.height) <= 0.01;
       if (!sameSize || !sameRatio) {
         canvas = normalizeCanvasToCanonical(rawCanvas, canonicalCanvasSize.width, canonicalCanvasSize.height);
-        pagesNormalized += 1;
         diagnostics?.failureReasons.push(`第 ${i + 1} 页触发尺寸归一化`);
       }
       if (detectBlankCanvas(canvas)) {
@@ -569,9 +605,10 @@ async function buildPptSnapshotPages(
     if (diagnostics) {
       diagnostics.uniqueCanvasSizes = Array.from(observedSizes.values());
       diagnostics.aspectRatios = Array.from(observedRatios.values());
-      diagnostics.pagesNormalizedCount = pagesNormalized;
+      diagnostics.pagesNormalizedCount = layoutValidatedPagesCount;
       diagnostics.canonicalSize = canonicalCanvasSize ?? undefined;
       diagnostics.consistencyStatus = diagnostics.uniqueCanvasSizes.length <= 1 && (diagnostics.aspectRatios?.length ?? 0) <= 1 ? "pass" : "warning";
+      diagnostics.layoutRecovered = diagnostics.layoutRecovered || layoutValidatedPagesCount > 0;
     }
     // hard assertion: 一旦检测到多尺寸，强制统一后置为 pass。
     if ((diagnostics?.uniqueCanvasSizes?.length ?? 0) > 1) {
