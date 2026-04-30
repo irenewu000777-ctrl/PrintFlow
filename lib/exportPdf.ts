@@ -1,4 +1,4 @@
-import { PDFDocument } from "pdf-lib";
+import { PDFDocument, degrees } from "pdf-lib";
 import { buildSheetLayouts, getPaperPt } from "./layout";
 import { mmToPt } from "./constants";
 import type { LayoutSettings, PagePipelineResult } from "./types";
@@ -36,18 +36,34 @@ export async function exportImposedPdf(data: PagePipelineResult, settings: Layou
 
         if (canUseSourcePdf) {
           const sourcePage = sourceDoc.getPage(item.page.pdfPageIndex!);
+          const rotation = sourcePage.getRotation().angle; // 0 | 90 | 180 | 270
           const embeddedPage = await outDoc.embedPage(sourcePage);
-          const scale = Math.min(cellWidth / embeddedPage.width, cellHeight / embeddedPage.height);
-          const drawWidth = embeddedPage.width * scale;
-          const drawHeight = embeddedPage.height * scale;
-          const drawX = x + (cellWidth - drawWidth) / 2;
-          const drawY = y + (cellHeight - drawHeight) / 2;
+
+          // embedPage uses raw MediaBox; swap dims for 90°/270° pages
+          const isSwapped = rotation === 90 || rotation === 270;
+          const intrinsicW = isSwapped ? embeddedPage.height : embeddedPage.width;
+          const intrinsicH = isSwapped ? embeddedPage.width  : embeddedPage.height;
+
+          const scale   = Math.min(cellWidth / intrinsicW, cellHeight / intrinsicH);
+          const scaledW = embeddedPage.width  * scale;
+          const scaledH = embeddedPage.height * scale;
+          const visualW = isSwapped ? scaledH : scaledW;
+          const visualH = isSwapped ? scaledW : scaledH;
+
+          const drawX = x + (cellWidth  - visualW) / 2;
+          const drawY = y + (cellHeight - visualH) / 2;
+
+          // Adjust anchor so visual bottom-left lands on (drawX, drawY) after CCW rotation
+          let embedX: number, embedY: number;
+          if (rotation === 90)       { embedX = drawX + scaledH; embedY = drawY;           }
+          else if (rotation === 180) { embedX = drawX + scaledW; embedY = drawY + scaledH; }
+          else if (rotation === 270) { embedX = drawX;           embedY = drawY + scaledW; }
+          else                       { embedX = drawX;           embedY = drawY;           }
 
           page.drawPage(embeddedPage, {
-            x: drawX,
-            y: drawY,
-            width: drawWidth,
-            height: drawHeight
+            x: embedX, y: embedY,
+            width: scaledW, height: scaledH,
+            rotate: degrees(rotation)
           });
           continue;
         }
