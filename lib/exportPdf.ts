@@ -37,34 +37,25 @@ export async function exportImposedPdf(data: PagePipelineResult, settings: Layou
         if (canUseSourcePdf) {
           const sourcePage = sourceDoc.getPage(item.page.pdfPageIndex!);
           const rotation = sourcePage.getRotation().angle; // 0 | 90 | 180 | 270
+
+          // Flatten /Rotate into MediaBox so embedPage sees visual dimensions directly.
+          // sourceDoc is a temporary in-memory load; mutating it does not affect the original file.
+          if (rotation === 90 || rotation === 270) {
+            const { width: mw, height: mh } = sourcePage.getMediaBox();
+            sourcePage.setMediaBox(0, 0, mh, mw);
+            sourcePage.setRotation(degrees(0));
+          } else if (rotation === 180) {
+            sourcePage.setRotation(degrees(0));
+          }
+
           const embeddedPage = await outDoc.embedPage(sourcePage);
+          const scale  = Math.min(cellWidth / embeddedPage.width, cellHeight / embeddedPage.height);
+          const drawW  = embeddedPage.width  * scale;
+          const drawH  = embeddedPage.height * scale;
+          const drawX  = x + (cellWidth  - drawW) / 2;
+          const drawY  = y + (cellHeight - drawH) / 2;
 
-          // embedPage uses raw MediaBox; swap dims for 90°/270° pages
-          const isSwapped = rotation === 90 || rotation === 270;
-          const intrinsicW = isSwapped ? embeddedPage.height : embeddedPage.width;
-          const intrinsicH = isSwapped ? embeddedPage.width  : embeddedPage.height;
-
-          const scale   = Math.min(cellWidth / intrinsicW, cellHeight / intrinsicH);
-          const scaledW = embeddedPage.width  * scale;
-          const scaledH = embeddedPage.height * scale;
-          const visualW = isSwapped ? scaledH : scaledW;
-          const visualH = isSwapped ? scaledW : scaledH;
-
-          const drawX = x + (cellWidth  - visualW) / 2;
-          const drawY = y + (cellHeight - visualH) / 2;
-
-          // Adjust anchor so visual bottom-left lands on (drawX, drawY) after CCW rotation
-          let embedX: number, embedY: number;
-          if (rotation === 90)       { embedX = drawX + scaledH; embedY = drawY;           }
-          else if (rotation === 180) { embedX = drawX + scaledW; embedY = drawY + scaledH; }
-          else if (rotation === 270) { embedX = drawX;           embedY = drawY + scaledW; }
-          else                       { embedX = drawX;           embedY = drawY;           }
-
-          page.drawPage(embeddedPage, {
-            x: embedX, y: embedY,
-            width: scaledW, height: scaledH,
-            rotate: degrees(rotation)
-          });
+          page.drawPage(embeddedPage, { x: drawX, y: drawY, width: drawW, height: drawH });
           continue;
         }
 
