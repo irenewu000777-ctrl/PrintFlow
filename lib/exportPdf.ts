@@ -1,4 +1,4 @@
-import { PDFDocument, degrees } from "pdf-lib";
+import { PDFDocument } from "pdf-lib";
 import { buildSheetLayouts, getPaperPt } from "./layout";
 import { mmToPt } from "./constants";
 import type { LayoutSettings, PagePipelineResult } from "./types";
@@ -36,27 +36,24 @@ export async function exportImposedPdf(data: PagePipelineResult, settings: Layou
 
         if (canUseSourcePdf) {
           const sourcePage = sourceDoc.getPage(item.page.pdfPageIndex!);
-          const rotation = sourcePage.getRotation().angle; // 0 | 90 | 180 | 270
-
-          // Flatten /Rotate into MediaBox so embedPage sees visual dimensions directly.
-          // sourceDoc is a temporary in-memory load; mutating it does not affect the original file.
-          if (rotation === 90 || rotation === 270) {
-            const { width: mw, height: mh } = sourcePage.getMediaBox();
-            sourcePage.setMediaBox(0, 0, mh, mw);
-            sourcePage.setRotation(degrees(0));
-          } else if (rotation === 180) {
-            sourcePage.setRotation(degrees(0));
-          }
-
           const embeddedPage = await outDoc.embedPage(sourcePage);
-          const scale  = Math.min(cellWidth / embeddedPage.width, cellHeight / embeddedPage.height);
-          const drawW  = embeddedPage.width  * scale;
-          const drawH  = embeddedPage.height * scale;
-          const drawX  = x + (cellWidth  - drawW) / 2;
-          const drawY  = y + (cellHeight - drawH) / 2;
 
-          page.drawPage(embeddedPage, { x: drawX, y: drawY, width: drawW, height: drawH });
-          continue;
+          // Compare pdfjs visual orientation (rotation-corrected) vs raw MediaBox orientation.
+          // If they differ, the page has CTM+/Rotate transforms that embedPage cannot replicate;
+          // fall through to the PNG path which already has the correct rendering.
+          const pdfjsLandscape = item.page.width > item.page.height;
+          const mediaBoxLandscape = embeddedPage.width > embeddedPage.height;
+
+          if (pdfjsLandscape === mediaBoxLandscape) {
+            const scale = Math.min(cellWidth / embeddedPage.width, cellHeight / embeddedPage.height);
+            const drawW  = embeddedPage.width  * scale;
+            const drawH  = embeddedPage.height * scale;
+            const drawX  = x + (cellWidth  - drawW) / 2;
+            const drawY  = y + (cellHeight - drawH) / 2;
+            page.drawPage(embeddedPage, { x: drawX, y: drawY, width: drawW, height: drawH });
+            continue;
+          }
+          // Orientation mismatch: fall through to PNG path
         }
 
         let embeddedImage = embeddedImageCache.get(item.page.image);
