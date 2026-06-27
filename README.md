@@ -7,7 +7,7 @@
 
 面向学生与轻量办公场景：上传 PDF、PPT 或 PPTX，按纸张、方向、行列与阅读顺序自动拼版，导出可直接打印的 PDF。
 
-**[立即使用 → printflow777.vercel.app](https://printflow777.vercel.app/)** · **[GitHub 源码](https://github.com/irenewu000777-ctrl/ppt-new1)**
+**[立即使用 → printflow777.vercel.app](https://printflow777.vercel.app/)** · **[GitHub 源码](https://github.com/irenewu000777-ctrl/PrintFlow)**
 
 ---
 
@@ -59,8 +59,8 @@ PPT/PPTX → pptx-preview 渲染幻灯片 → html-to-image 截图 → pdf-lib �
 环境要求：Node.js 18+、npm
 
 ```bash
-git clone https://github.com/irenewu000777-ctrl/ppt-new1.git
-cd ppt-new1
+git clone https://github.com/irenewu000777-ctrl/PrintFlow.git
+cd PrintFlow
 npm install
 npm run dev
 ```
@@ -100,4 +100,4 @@ docs/
 
 ## 许可证
 
-Private — 详见 [GitHub 仓库](https://github.com/irenewu000777-ctrl/ppt-new1) 设置。
+Private — 详见 [GitHub 仓库](https://github.com/irenewu000777-ctrl/PrintFlow) 设置。
